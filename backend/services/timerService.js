@@ -30,6 +30,11 @@ const TIME_CONTROLS = {
 const DEFAULT_PRESET = "rapid";
 const RECONNECT_GRACE_SECONDS = 60;
 
+// Heartbeat configuration for detecting dead mobile connections
+const HEARTBEAT_INTERVAL_MS = 15 * 1000; // Send ping every 15 seconds
+const HEARTBEAT_TIMEOUT_MS = 10 * 1000; // Wait 10 seconds for pong response
+const HEARTBEAT_MAX_MISSES = 2; // Disconnect after 2 consecutive missed pongs
+
 function resolveTimeControl({ preset, baseSeconds, incrementSeconds } = {}) {
 	if (preset && TIME_CONTROLS[preset]) {
 		return { preset, ...TIME_CONTROLS[preset] };
@@ -59,6 +64,11 @@ class TimerService {
 		// `${gameCode}:${color}` -> { timeout, expiresAt }
 		this.player_disconnect_timers = new Map();
 		this.reconnectTimers = this.player_disconnect_timers;
+
+		// Heartbeat management: `${gameCode}:${socketId}` -> {
+		//   color, interval, pendingPing, missCount, lastHeartbeatAt
+		// }
+		this.heartbeats = new Map();
 	}
 
 	init(io) {
@@ -305,8 +315,131 @@ class TimerService {
 	isPendingForfeit(gameCode, color) {
 		return this.player_disconnect_timers.has(`${gameCode}:${color}`);
 	}
+
+	// -------------------------------------------------------------------
+	// Application-level heartbeat monitoring (detect dead mobile connections)
+	// -------------------------------------------------------------------
+
+	/**
+	 * Start active heartbeat monitoring for a connected player socket.
+	 * Emits ping_heartbeat every 15 seconds; expects pong_heartbeat response.
+	 * After 2 consecutive missed pongs, the socket should be forcibly disconnected.
+	 *
+	 * @param {object} socket - Socket.io socket instance
+	 * @param {string} gameCode
+	 * @param {"white"|"black"} playerColor
+	 */
+	startHeartbeat(socket, gameCode, playerColor) {
+		const key = `${gameCode}:${socket.id}`;
+		this.stopHeartbeat(socket, gameCode); // Clear any existing heartbeat
+
+		const state = {
+			color: playerColor,
+			gameCode,
+			missCount: 0,
+			lastHeartbeatAt: Date.now(),
+			pendingPing: null,
+			interval: null,
+		};
+
+		// Emit ping every HEARTBEAT_INTERVAL_MS (15s)
+		state.interval = setInterval(() => {
+			if (!this.heartbeats.has(key)) return; // Heart stopped
+
+			const clientTimestamp = Date.now();
+			state.pendingPing = clientTimestamp;
+
+			// Emit challenge to client; expect pong_heartbeat response within HEARTBEAT_TIMEOUT_MS
+			if (this.io && socket && socket.emit) {
+				socket.emit("ping_heartbeat", { timestamp: clientTimestamp });
+			}
+
+			// Schedule timeout: if no pong response within 10s, increment miss count
+			const timeoutHandle = setTimeout(() => {
+				const current = this.heartbeats.get(key);
+				if (!current) return; // Heartbeat was cancelled
+
+				// Increment consecutive miss counter
+				current.missCount++;
+
+				if (current.missCount >= HEARTBEAT_MAX_MISSES) {
+					// 2 consecutive misses = treat as dead connection; force disconnect
+					this.stopHeartbeat(socket, gameCode);
+					if (socket && socket.disconnect) {
+						socket.disconnect(true); // true = close transport
+					}
+				}
+			}, HEARTBEAT_TIMEOUT_MS);
+
+			// Store timeout so we can cancel it if pong arrives
+			state.pendingTimeout = timeoutHandle;
+		}, HEARTBEAT_INTERVAL_MS);
+
+		this.heartbeats.set(key, state);
+	}
+
+	/**
+	 * Record a successful pong_heartbeat response from the client.
+	 * Resets the miss counter and clears any pending timeout.
+	 *
+	 * @param {object} socket
+	 * @param {string} gameCode
+	 * @param {object} data - { timestamp } from client pong
+	 */
+	recordHeartbeatAck(socket, gameCode, data = {}) {
+		const key = `${gameCode}:${socket.id}`;
+		const state = this.heartbeats.get(key);
+		if (!state) return;
+
+		// Clear any pending timeout from the last ping
+		if (state.pendingTimeout) {
+			clearTimeout(state.pendingTimeout);
+			state.pendingTimeout = null;
+		}
+
+		// Reset miss counter on successful pong
+		state.missCount = 0;
+		state.lastHeartbeatAt = Date.now();
+		state.pendingPing = null;
+	}
+
+	/**
+	 * Stop heartbeat monitoring for a player socket.
+	 * Called when a player leaves/disconnects.
+	 *
+	 * @param {object} socket
+	 * @param {string} gameCode
+	 */
+	stopHeartbeat(socket, gameCode) {
+		const key = `${gameCode}:${socket.id}`;
+		const state = this.heartbeats.get(key);
+		if (!state) return;
+
+		if (state.interval) {
+			clearInterval(state.interval);
+		}
+		if (state.pendingTimeout) {
+			clearTimeout(state.pendingTimeout);
+		}
+
+		this.heartbeats.delete(key);
+	}
+
+	/**
+	 * Utility: Get heartbeat state for a socket (for testing).
+	 * @param {object} socket
+	 * @param {string} gameCode
+	 * @returns {object|null}
+	 */
+	getHeartbeatState(socket, gameCode) {
+		const key = `${gameCode}:${socket.id}`;
+		return this.heartbeats.get(key) || null;
+	}
 }
 
 module.exports = new TimerService();
 module.exports.TIME_CONTROLS = TIME_CONTROLS;
 module.exports.RECONNECT_GRACE_SECONDS = RECONNECT_GRACE_SECONDS;
+module.exports.HEARTBEAT_INTERVAL_MS = HEARTBEAT_INTERVAL_MS;
+module.exports.HEARTBEAT_TIMEOUT_MS = HEARTBEAT_TIMEOUT_MS;
+module.exports.HEARTBEAT_MAX_MISSES = HEARTBEAT_MAX_MISSES;

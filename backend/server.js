@@ -268,6 +268,10 @@ io.on("connection", (socket) => {
         presence[boundColor].socketId = socket.id;
         broadcastPresence(gameCode, boundColor, "online");
 
+        // Start application-level heartbeat monitoring to detect dead mobile connections
+        // (Issue #490: heartbeat ping-pong validation)
+        timerService.startHeartbeat(socket, gameCode, boundColor);
+
         if (wasReconnecting) {
           socket.to(gameCode).emit("player-reconnected", { gameCode, color: boundColor });
         }
@@ -343,6 +347,7 @@ io.on("connection", (socket) => {
   socket.on("leave-game", validateSocketPayload(LeaveGameSchema, (gameCode) => {
     const code = typeof gameCode === "string" ? gameCode : gameCode?.gameCode || gameCode?.gameId;
     if (code) {
+      timerService.stopHeartbeat(socket, code);
       socket.leave(code);
     }
   }));
@@ -365,11 +370,28 @@ io.on("connection", (socket) => {
     });
   }));
 
+  /**
+   * Heartbeat pong handler (Issue #490).
+   * Client responds to ping_heartbeat with pong_heartbeat, including the
+   * timestamp echoed back. This resets the missed heartbeat counter and
+   * confirms the connection is alive (not suspended by mobile OS).
+   */
+  socket.on("pong_heartbeat", ({ timestamp } = {}) => {
+    const { gameCode, playerColor } = socket.data || {};
+    if (!gameCode || !playerColor) return;
+
+    // Record successful pong response; resets miss counter
+    timerService.recordHeartbeatAck(socket, gameCode, { timestamp });
+  });
+
   socket.on("disconnect", async () => {
     metricsRoutes.setConnectedClients(io.engine.clientsCount);
     metricsRoutes.markGameDisconnected(socket.data?.gameCode);
     const { gameCode, playerColor } = socket.data || {};
     if (!gameCode || !playerColor) return;
+
+    // Stop heartbeat monitoring when socket disconnects
+    timerService.stopHeartbeat(socket, gameCode);
 
     const presence = getPresenceEntry(gameCode);
     // Ignore stale disconnects from a socket that already got replaced by a
