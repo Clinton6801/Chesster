@@ -100,6 +100,9 @@ interface GameStore {
   // Haptic feedback for touch and interactions (#439)
   isHapticsEnabled: boolean;
   toggleHaptics: () => void;
+  // Move confirmation for high-stakes games (Issue #493)
+  isMoveConfirmationEnabled: boolean;
+  toggleMoveConfirmation: () => void;
   masterVolume: number;
   setMasterVolume: (volume: number) => void;
   // Settings modal visibility
@@ -173,6 +176,7 @@ export const useGameStore = create<GameStore>()(
       isBlindfoldMode: false,
       isStreamerMode: false,
       isHapticsEnabled: true,
+      isMoveConfirmationEnabled: false,
       masterVolume: soundService.getVolume(),
       isSettingsOpen: false,
 
@@ -182,6 +186,8 @@ export const useGameStore = create<GameStore>()(
         set((s) => ({ isStreamerMode: !s.isStreamerMode })),
       toggleHaptics: () =>
         set((s) => ({ isHapticsEnabled: !s.isHapticsEnabled })),
+      toggleMoveConfirmation: () =>
+        set((s) => ({ isMoveConfirmationEnabled: !s.isMoveConfirmationEnabled })),
       setMasterVolume: (volume: number) => {
         const normalized = Math.min(1, Math.max(0, volume));
         soundService.setMasterVolume(normalized);
@@ -603,6 +609,7 @@ export const useGameStore = create<GameStore>()(
         isBlindfoldMode: state.isBlindfoldMode,
         isStreamerMode: state.isStreamerMode,
         isHapticsEnabled: state.isHapticsEnabled,
+        isMoveConfirmationEnabled: state.isMoveConfirmationEnabled,
       }),
     }
   )

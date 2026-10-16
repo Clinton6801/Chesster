@@ -345,6 +345,11 @@ function ChessBoardInner() {
     from: [number, number];
     to: [number, number];
   } | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    from: [number, number];
+    to: [number, number];
+    promotion?: string;
+  } | null>(null);
   const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [showResultModal, setShowResultModal] = useState(false);
   const [confirmAction, setConfirmAction] = useState<"resign" | "leave" | null>(null);
@@ -370,6 +375,7 @@ function ChessBoardInner() {
   const toggleStreamerMode = useGameStore((s) => s.toggleStreamerMode);
   const isHapticsEnabled = useGameStore((s) => s.isHapticsEnabled);
   const toggleHaptics = useGameStore((s) => s.toggleHaptics);
+  const isMoveConfirmationEnabled = useGameStore((s) => s.isMoveConfirmationEnabled);
 
   const safeHaptic = (type: "pickup" | "drop" | "error") => {
     if (isHapticsEnabled) triggerHaptic(type);
@@ -809,11 +815,18 @@ function ChessBoardInner() {
       return;
     }
 
+    // If move confirmation is enabled, show the confirmation overlay instead of immediately committing
+    if (isMoveConfirmationEnabled && !pendingConfirmation) {
+      setPendingConfirmation({ from, to, promotion });
+      return;
+    }
+
     setIsMoving(true);
     const toastId = addToast("Moving...", "loading");
     try {
       await makeMove(from, to, promotion);
       safeHaptic("drop");
+      setPendingConfirmation(null);
     } catch (error: unknown) {
       safeHaptic("error");
       addToast(friendlyError(error), "error");
@@ -835,6 +848,32 @@ function ChessBoardInner() {
     setQueuedPremove({ from, to, promotion: isPromotion ? "q" : undefined });
     selectSquare(null);
     safeHaptic("drop");
+  };
+
+  const confirmPendingMove = async () => {
+    if (!pendingConfirmation) return;
+    const { from, to, promotion } = pendingConfirmation;
+    setPendingConfirmation(null);
+    
+    setIsMoving(true);
+    const toastId = addToast("Moving...", "loading");
+    try {
+      await makeMove(from, to, promotion);
+      safeHaptic("drop");
+    } catch (error: unknown) {
+      safeHaptic("error");
+      addToast(friendlyError(error), "error");
+      selectSquare(null);
+    } finally {
+      removeToast(toastId);
+      setIsMoving(false);
+    }
+  };
+
+  const cancelPendingMove = () => {
+    setPendingConfirmation(null);
+    selectSquare(null);
+    safeHaptic("error");
   };
 
   const handleSquareClick = async (row: number, col: number) => {
@@ -2189,6 +2228,33 @@ function ChessBoardInner() {
                 {PIECE_SYMBOLS[dragPiece.piece]}
               </span>
             )}
+
+          {/* Move Confirmation Overlay (#493) */}
+          {pendingConfirmation && (
+            <div
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              style={{ zIndex: 20 }}
+            >
+              <div className="flex gap-2 pointer-events-auto">
+                <button
+                  onClick={confirmPendingMove}
+                  className="bg-emerald-600 hover:bg-emerald-700 p-2 rounded-full text-white shadow-lg transition-colors flex items-center justify-center"
+                  title="Confirm move"
+                  aria-label="Confirm move"
+                >
+                  <Check size={20} />
+                </button>
+                <button
+                  onClick={cancelPendingMove}
+                  className="bg-rose-600 hover:bg-rose-700 p-2 rounded-full text-white shadow-lg transition-colors flex items-center justify-center"
+                  title="Cancel move"
+                  aria-label="Cancel move"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+          )}
           </div>
 
           {/* Player Bar */}

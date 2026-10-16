@@ -11,6 +11,8 @@ export default function GameSettings({ hideFloating = false }: { hideFloating?: 
   const toggleStreamerMode = useGameStore((s) => s.toggleStreamerMode);
   const isHapticsEnabled = useGameStore((s) => s.isHapticsEnabled);
   const toggleHaptics = useGameStore((s) => s.toggleHaptics);
+  const isMoveConfirmationEnabled = useGameStore((s) => s.isMoveConfirmationEnabled);
+  const toggleMoveConfirmation = useGameStore((s) => s.toggleMoveConfirmation);
   const masterVolume = useGameStore((s) => s.masterVolume);
   const setMasterVolume = useGameStore((s) => s.setMasterVolume);
   const boardTheme = useThemeStore((s) => s.boardTheme);
@@ -221,6 +223,34 @@ export default function GameSettings({ hideFloating = false }: { hideFloating?: 
                   <div
                     className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-md transition-transform ${
                       isHapticsEnabled ? "translate-x-5" : "translate-x-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Move Confirmation Toggle (#493) */}
+            <div className="flex flex-col gap-3 pt-3 border-t border-(--border)">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-semibold">Move Confirmation</label>
+                  <p className="text-xs text-(--text-tertiary)">
+                    Require confirmation before committing moves in high-stakes games
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleMoveConfirmation}
+                  className={`relative flex h-6 w-11 rounded-full transition-colors ${
+                    isMoveConfirmationEnabled ? "bg-(--accent-primary)" : "bg-(--bg-tertiary)"
+                  }`}
+                  role="switch"
+                  aria-checked={isMoveConfirmationEnabled}
+                  aria-label="Toggle move confirmation"
+                >
+                  <div
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-md transition-transform ${
+                      isMoveConfirmationEnabled ? "translate-x-5" : "translate-x-0.5"
                     }`}
                   />
                 </button>
